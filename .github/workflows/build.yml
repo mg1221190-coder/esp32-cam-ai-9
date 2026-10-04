@@ -1,0 +1,66 @@
+name: Build ESP32 Firmware
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ESP-IDF Binaries
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.1
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Fix Git Permissions
+        run: git config --global --add safe.directory '*'
+
+      - name: Unpack Zip and Build
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+
+          # Unzip any zip archive present in the repository
+          python3 -c "
+          import zipfile, glob, os
+          zips = glob.glob('*.zip') + glob.glob('**/*.zip', recursive=True)
+          for z in zips:
+              print('Unpacking:', z)
+              with zipfile.ZipFile(z, 'r') as zip_ref:
+                  zip_ref.extractall('extracted_project')
+          "
+
+          # Automatically find the real ESP-IDF project folder
+          PROJECT_DIR=""
+          for f in $(find . -name "CMakeLists.txt"); do
+            dir=$(dirname "$f")
+            if [ -d "$dir/main" ] && [ -f "$dir/main/CMakeLists.txt" ]; then
+              PROJECT_DIR="$dir"
+              break
+            fi
+          done
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not find project folder with main/ directory."
+            find . -maxdepth 3
+            exit 1
+          fi
+
+          echo "Found project at: $PROJECT_DIR"
+          cd "$PROJECT_DIR"
+
+          idf.py set-target esp32
+          idf.py build
+
+      - name: Upload Binary Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32cam-binaries
+          path: |
+            **/build/bootloader/bootloader.bin
+            **/build/partition_table/partition-table.bin
+            **/build/*.bin
+            
